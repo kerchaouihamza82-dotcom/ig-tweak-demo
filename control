@@ -1,6 +1,6 @@
 Package: com.hamza.igdemo
 Name: IG Demo porcentajes
-Version: 0.0.1
+Version: 0.0.2
 Architecture: iphoneos-arm
 Description: Demo para clase - modifica los porcentajes de audiencia que muestra Instagram
 Maintainer: hamza
