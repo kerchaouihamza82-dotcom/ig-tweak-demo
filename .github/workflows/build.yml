@@ -19,15 +19,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential rsync xz-utils unzip
 
-      - name: Preparar Theos y ldid
+      - name: Preparar Theos, toolchain y ldid
         run: |
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
-          mkdir -p "$HOME/theos/sdks"
+          mkdir -p "$HOME/theos/sdks" "$HOME/theos/toolchain"
           curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o /tmp/sdks.zip
           unzip -q /tmp/sdks.zip -d /tmp
           mv /tmp/sdks-master/iPhoneOS*.sdk "$HOME/theos/sdks/"
+          curl -L "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz" -o /tmp/tc.tar.xz
+          tar -xJf /tmp/tc.tar.xz -C "$HOME/theos/toolchain/"
           curl -L "https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64" -o /tmp/ldid
           sudo install -m755 /tmp/ldid /usr/local/bin/ldid
+          sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.5
 
       - name: Compilar tweak
         run: |
