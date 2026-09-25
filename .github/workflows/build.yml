@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ldid rsync xz-utils unzip
+
+      - name: Preparar Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          mkdir -p "$HOME/theos/sdks"
+          curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o /tmp/sdks.zip
+          unzip -q /tmp/sdks.zip -d /tmp
+          mv /tmp/sdks-master/iPhoneOS*.sdk "$HOME/theos/sdks/"
+
+      - name: Compilar tweak
+        run: |
+          export THEOS="$HOME/theos"
+          export THEOS_PACKAGE_SCHEME=rootless
+          make package FINALPACKAGE=1
+          ls -la packages/
+
+      - name: Subir .deb como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: igdemo-deb
+          path: packages/*.deb
+
+      - name: Publicar release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.0.${{ github.run_number }}
+          name: build ${{ github.run_number }}
+          files: packages/*.deb
