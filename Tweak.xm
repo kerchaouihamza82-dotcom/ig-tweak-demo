@@ -178,31 +178,19 @@ static NSArray<IGDemoNode *> *igdemo_filaDe(IGDemoNode *nombre, NSArray<IGDemoNo
             if (!filaM || f.count > filaM.count) { filaM = f; nameM = candidato; }
         }
 
-        igdemo_log(@"nodos: namesE=%lu namesM=%lu pcts=%lu filaE=%lu filaM=%lu",
-                   (unsigned long)namesE.count, (unsigned long)namesM.count, (unsigned long)pcts.count,
-                   (unsigned long)filaE.count, (unsigned long)filaM.count);
+        igdemo_log(@"nodos: namesE=%lu namesM=%lu pcts=%lu",
+                   (unsigned long)namesE.count, (unsigned long)namesM.count, (unsigned long)pcts.count);
 
         NSMutableArray<NSString *> *findings = [NSMutableArray array];
 
-        if (filaE.count > 0 && filaM.count > 0) {
-            NSUInteger n = MIN(filaE.count, filaM.count);
-            for (NSUInteger i = 0; i < n; i++) {
-                NSString *vE = filaE[i].s;
-                NSString *vM = filaM[i].s;
-                if (![vE isEqualToString:vM]) {
-                    igdemo_setInParent(filaE[i].parent, filaE[i].key, vM);
-                    igdemo_setInParent(filaM[i].parent, filaM[i].key, vE);
-                }
-            }
-            [findings addObject:[NSString stringWithFormat:@"filas intercambiadas (%lu valores)", (unsigned long)n]];
-
+        if (nameE && nameM) {
             NSString *nE_txt = nameE.s;
             NSString *nM_txt = nameM.s;
             igdemo_setInParent(nameE.parent, nameE.key, nM_txt);
             igdemo_setInParent(nameM.parent, nameM.key, nE_txt);
             [findings addObject:@"nombres intercambiados"];
         } else {
-            [findings addObject:@"filas vacias, sin swap"];
+            [findings addObject:@"nombres no encontrados, sin swap"];
         }
 
         for (NSString *f in findings) igdemo_log(@">>> %@", f);
@@ -219,5 +207,5 @@ static NSArray<IGDemoNode *> *igdemo_filaDe(IGDemoNode *nombre, NSArray<IGDemoNo
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.4 (swap filas Espana<->Mexico) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.5 (swap solo nombres) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
