@@ -1,14 +1,12 @@
 #import <Foundation/Foundation.h>
 
-// Demo para clase - v0.0.2
-// La pantalla de audiencia de Instagram es un payload "Bloks" (interfaz
-// pre-cocinada del servidor). Esta version busca cadenas de texto que
-// mencionen España y reemplaza el porcentaje que llevan al lado.
-// Ademas vuelca a los logs los payloads de audiencia para depurar.
+// Demo para clase - v0.0.3
+// La pantalla de audiencia de Instagram es un payload "Bloks". Objetivo:
+// INTERCAMBIAR el porcentaje de España con el de México (misma suma total,
+// nadie nota nada). Si el número no está en texto plano, vuelca el payload
+// a los logs para depurar.
 
 #define IGDEMO_TAG "[IGDEMO]"
-static const double kIGDemoTarget = 26.0;
-static NSString * const kIGDemoTargetPct = @"26%";
 
 static void igdemo_log(NSString *format, ...) {
     va_list args;
@@ -22,27 +20,25 @@ static BOOL igdemo_stringMentionsSpain(NSString *s) {
     return [s containsString:@"España"] || [s containsString:@"Spain"] || [s containsString:@"🇪🇸"];
 }
 
-// Vuelca un texto a los logs en trozos para poder reconstruirlo
-static void igdemo_dumpString(NSString *tag, NSString *s) {
-    if (!s) return;
-    NSUInteger len = MIN(s.length, (NSUInteger)60000);
-    NSUInteger chunk = 1800;
-    NSUInteger total = (len + chunk - 1) / chunk;
-    for (NSUInteger i = 0; i < len; i += chunk) {
-        NSUInteger e = MIN(i + chunk, len);
-        igdemo_log(@"DUMP[%@ %lu/%lu] %@", tag, (unsigned long)(i / chunk + 1), (unsigned long)total,
-                   [s substringWithRange:NSMakeRange(i, e - i)]);
-    }
+static BOOL igdemo_stringMentionsMexico(NSString *s) {
+    return [s containsString:@"México"] || [s containsString:@"Mexico"] || [s containsString:@"🇲🇽"];
 }
 
-static void igdemo_walk(id obj, id parent, id key, NSInteger depth, NSMutableArray<NSString *> *findings);
-
-// "12,4%" -> "26%"; "12.4 %" -> "26%" ; etc.
-static NSString *igdemo_replaceFirstPercent(NSString *s) {
+// Primer token tipo porcentaje: "27,0%", "12,4 %", "13,14%", ...
+static NSString *igdemo_firstPercentToken(NSString *s) {
+    if (!s || s.length == 0 || s.length > 200000) return nil;
     NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"\\d+(?:[.,]\\d+)?\\s*%" options:0 error:nil];
     NSTextCheckingResult *m = [re firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
     if (!m) return nil;
-    return [s stringByReplacingCharactersInRange:[m range] withString:kIGDemoTargetPct];
+    return [s substringWithRange:[m range]];
+}
+
+// Reemplaza el primer porcentaje del texto por el token dado
+static NSString *igdemo_replaceFirstPercent(NSString *s, NSString *token) {
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"\\d+(?:[.,]\\d+)?\\s*%" options:0 error:nil];
+    NSTextCheckingResult *m = [re firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (!m || !token) return nil;
+    return [s stringByReplacingCharactersInRange:[m range] withString:token];
 }
 
 static void igdemo_setInParent(id parent, id key, id value) {
@@ -55,112 +51,146 @@ static void igdemo_setInParent(id parent, id key, id value) {
     } @catch (NSException *e) {}
 }
 
-static void igdemo_mutateString(id parent, id key, NSString *s, NSInteger depth, NSMutableArray<NSString *> *findings) {
-    if (findings.count > 40) return;
-    if (![s isKindOfClass:[NSString class]] || s.length == 0 || s.length > 200000) return;
-
-    // Caso A: texto visible "🇪🇸 España 12,4%" -> cambiar el porcentaje en el propio texto
-    if (igdemo_stringMentionsSpain(s)) {
-        NSString *newS = igdemo_replaceFirstPercent(s);
-        if (newS) {
-            [findings addObject:[NSString stringWithFormat:@"texto España: '%@' -> '%@'", s, newS]];
-            igdemo_setInParent(parent, key, newS);
-            return;
-        }
-        [findings addObject:[NSString stringWithFormat:@"texto España sin porcentaje: '%@'", s]];
-    }
-
-    // Caso B: la cadena es JSON embebido (typico de Bloks) -> parsear, recorrer y re-serializar
-    NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (t.length > 1 && ([t hasPrefix:@"{"] || [t hasPrefix:@"["]) &&
-        (igdemo_stringMentionsSpain(s) || [s containsString:@"audience"] || [s containsString:@"demograph"])) {
-        NSData *d = [t dataUsingEncoding:NSUTF8StringEncoding];
-        id inner = d ? [NSJSONSerialization JSONObjectWithData:d
-                                                       options:(NSJSONReadingMutableContainers | NSJSONReadingMutableLeaves)
-                                                         error:nil] : nil;
-        if (inner) {
-            NSUInteger before = findings.count;
-            igdemo_walk(inner, nil, nil, depth + 1, findings);
-            if (findings.count > before) {
-                NSData *nd = [NSJSONSerialization dataWithJSONObject:inner options:0 error:nil];
-                if (nd) {
-                    NSString *ns = [[NSString alloc] initWithData:nd encoding:NSUTF8StringEncoding];
-                    igdemo_setInParent(parent, key, ns);
-                }
-            }
-        }
+static void igdemo_dumpString(NSString *tag, NSString *s) {
+    if (!s) return;
+    NSUInteger len = MIN(s.length, (NSUInteger)60000);
+    NSUInteger chunk = 1800;
+    NSUInteger total = (len + chunk - 1) / chunk;
+    for (NSUInteger i = 0; i < len; i += chunk) {
+        NSUInteger e = MIN(i + chunk, len);
+        igdemo_log(@"DUMP[%@ %lu/%lu] %@", tag, (unsigned long)(i / chunk + 1), (unsigned long)total,
+                   [s substringWithRange:NSMakeRange(i, e - i)]);
     }
 }
 
-static BOOL igdemo_looksLikeCountryMap(NSDictionary *dict) {
-    NSUInteger n = 0;
-    for (NSString *k in dict) {
-        if ([k isKindOfClass:[NSString class]] && k.length == 2 &&
-            [[NSCharacterSet uppercaseLetterCharacterSet] characterIsMember:[k characterAtIndex:0]] &&
-            [[NSCharacterSet uppercaseLetterCharacterSet] characterIsMember:[k characterAtIndex:1]]) {
-            n++;
-        }
-    }
-    return n >= 3;
-}
+// Referencia a una cadena candidata encontrada en el árbol
+@interface IGDemoRef : NSObject
+@property (strong) id parent;   // contenedor mutable que la sostiene
+@property (strong) id key;      // clave o índice
+@property (strong) NSString *s; // texto original
+@property (strong) id inner;    // si la cadena era JSON embebido: el objeto ya parseado
+@end
+@implementation IGDemoRef
+@end
 
-static void igdemo_walk(id obj, id parent, id key, NSInteger depth, NSMutableArray<NSString *> *findings) {
+// Recolecta cadenas candidatas (España o México con porcentaje) y, al pasar
+// por JSON embebido, entra dentro y sigue recolectando.
+static void igdemo_collect(id obj, NSInteger depth, NSMutableArray<IGDemoRef *> *refs, NSMutableSet<NSString *> *seen) {
     if (!obj || depth > 20) return;
 
-    if ([obj isKindOfClass:[NSString class]]) {
-        igdemo_mutateString(parent, key, obj, depth, findings);
-        return;
-    }
-
     if ([obj isKindOfClass:[NSDictionary class]]) {
-        NSMutableDictionary *dict = (NSMutableDictionary *)obj;
-
-        // Mapa directo { "ES": 12.4, "MX": 8.0, ... }
-        if (igdemo_looksLikeCountryMap(dict)) {
-            id es = dict[@"ES"];
-            if ([es isKindOfClass:[NSNumber class]]) {
-                double v = [es doubleValue];
-                if (v > 0 && v < 100) {
-                    [findings addObject:[NSString stringWithFormat:@"mapa ES=%@", es]];
-                    igdemo_setInParent(dict, @"ES", @(kIGDemoTarget));
+        for (id k in [(NSDictionary *)obj allKeys]) {
+            id v = obj[k];
+            if (![v isKindOfClass:[NSString class]]) { igdemo_collect(v, depth + 1, refs, seen); continue; }
+            NSString *s = v;
+            BOOL candidata = (igdemo_stringMentionsSpain(s) || igdemo_stringMentionsMexico(s)) && igdemo_firstPercentToken(s);
+            if (candidata) {
+                NSString *huella = [NSString stringWithFormat:@"%p|%@", obj, k];
+                if (![seen containsObject:huella]) {
+                    [seen addObject:huella];
+                    IGDemoRef *r = [IGDemoRef new];
+                    r.parent = obj; r.key = k; r.s = s;
+                    [refs addObject:r];
                 }
-            } else if ([es isKindOfClass:[NSString class]]) {
-                NSString *newS = igdemo_replaceFirstPercent(es);
-                if (newS) {
-                    [findings addObject:[NSString stringWithFormat:@"mapa ES(str)=%@ -> %@", es, newS]];
-                    igdemo_setInParent(dict, @"ES", newS);
-                }
+                continue;
             }
-        }
-
-        // Lista tipo { "name": "Spain" | "ES" | "España", "value": 12.4 }
-        id nm = dict[@"name"] ?: dict[@"label"] ?: dict[@"key"];
-        if ([nm isKindOfClass:[NSString class]]) {
-            NSString *l = [nm lowercaseString];
-            BOOL isSpain = ([nm isEqualToString:@"ES"] || [l isEqualToString:@"spain"] ||
-                            [l isEqualToString:@"españa"] || [l isEqualToString:@"espana"] || [l isEqualToString:@"es"]);
-            if (isSpain) {
-                for (NSString *vk in @[@"value", @"percentage", @"percent", @"count", @"share", @"ratio"]) {
-                    id v = dict[vk];
-                    if ([v isKindOfClass:[NSNumber class]]) {
-                        double d = [v doubleValue];
-                        if (d >= 0 && d <= 100) {
-                            [findings addObject:[NSString stringWithFormat:@"lista %@ %@=%@", nm, vk, v]];
-                            igdemo_setInParent(dict, vk, @(kIGDemoTarget));
-                        }
-                        break;
+            // ¿JSON embebido?
+            NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (t.length > 1 && ([t hasPrefix:@"{"] || [t hasPrefix:@"["]) &&
+                (igdemo_stringMentionsSpain(s) || igdemo_stringMentionsMexico(s) ||
+                 [s containsString:@"audience"] || [s containsString:@"demograph"])) {
+                NSData *d = [t dataUsingEncoding:NSUTF8StringEncoding];
+                id inner = d ? [NSJSONSerialization JSONObjectWithData:d
+                                                               options:(NSJSONReadingMutableContainers | NSJSONReadingMutableLeaves)
+                                                                 error:nil] : nil;
+                if (inner) {
+                    NSUInteger before = refs.count;
+                    igdemo_collect(inner, depth + 1, refs, seen);
+                    if (refs.count > before) {
+                        IGDemoRef *r = [IGDemoRef new];
+                        r.parent = obj; r.key = k; r.s = s; r.inner = inner;
+                        [refs addObject:r];
                     }
                 }
             }
         }
-
-        for (id k in [dict allKeys]) {
-            igdemo_walk(dict[k], dict, k, depth + 1, findings);
-        }
     } else if ([obj isKindOfClass:[NSArray class]]) {
         NSArray *arr = (NSArray *)obj;
         for (NSUInteger i = 0; i < arr.count; i++) {
-            igdemo_walk(arr[i], (NSMutableArray *)arr, @(i), depth + 1, findings);
+            id v = arr[i];
+            if ([v isKindOfClass:[NSString class]]) {
+                NSString *s = v;
+                BOOL candidata = (igdemo_stringMentionsSpain(s) || igdemo_stringMentionsMexico(s)) && igdemo_firstPercentToken(s);
+                if (candidata) {
+                    NSString *huella = [NSString stringWithFormat:@"%p|%lu", obj, (unsigned long)i];
+                    if (![seen containsObject:huella]) {
+                        [seen addObject:huella];
+                        IGDemoRef *r = [IGDemoRef new];
+                        r.parent = (NSMutableArray *)arr; r.key = @(i); r.s = s;
+                        [refs addObject:r];
+                    }
+                    continue;
+                }
+                NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (t.length > 1 && ([t hasPrefix:@"{"] || [t hasPrefix:@"["]) &&
+                    (igdemo_stringMentionsSpain(s) || igdemo_stringMentionsMexico(s) ||
+                     [s containsString:@"audience"] || [s containsString:@"demograph"])) {
+                    NSData *d = [t dataUsingEncoding:NSUTF8StringEncoding];
+                    id inner = d ? [NSJSONSerialization JSONObjectWithData:d
+                                                                   options:(NSJSONReadingMutableContainers | NSJSONReadingMutableLeaves)
+                                                                     error:nil] : nil;
+                    if (inner) {
+                        NSUInteger before = refs.count;
+                        igdemo_collect(inner, depth + 1, refs, seen);
+                        if (refs.count > before) {
+                            IGDemoRef *r = [IGDemoRef new];
+                            r.parent = (NSMutableArray *)arr; r.key = @(i); r.s = s; r.inner = inner;
+                            [refs addObject:r];
+                        }
+                    }
+                }
+            } else {
+                igdemo_collect(v, depth + 1, refs, seen);
+            }
+        }
+    }
+}
+
+// Intercambia los porcentajes España <-> México entre las referencias halladas
+static void igdemo_doSwap(NSMutableArray<IGDemoRef *> *refs, NSMutableSet<id> *modifiedInners, NSMutableArray<NSString *> *findings) {
+    IGDemoRef *refE = nil, *refM = nil;
+    for (IGDemoRef *r in refs) {
+        if (!refE && igdemo_stringMentionsSpain(r.s)) refE = r;
+        else if (!refM && igdemo_stringMentionsMexico(r.s)) refM = r;
+    }
+    if (!refE || !refM) {
+        [findings addObject:[NSString stringWithFormat:@"falta candidato: España=%d México=%d", refE != nil, refM != nil]];
+        return;
+    }
+    NSString *pE = igdemo_firstPercentToken(refE.s);
+    NSString *pM = igdemo_firstPercentToken(refM.s);
+    if (!pE || !pM) return;
+
+    NSString *newE = igdemo_replaceFirstPercent(refE.s, pM);
+    NSString *newM = igdemo_replaceFirstPercent(refM.s, pE);
+    if (!newE || !newM) return;
+
+    igdemo_setInParent(refE.parent, refE.key, newE);
+    igdemo_setInParent(refM.parent, refM.key, newM);
+    if (refE.inner) [modifiedInners addObject:refE.inner];
+    if (refM.inner) [modifiedInners addObject:refM.inner];
+    [findings addObject:[NSString stringWithFormat:@"SWAP: España %@ <-> México %@", pM, pE]];
+}
+
+// Re-serializa los JSON embebidos que cambiamos
+static void igdemo_flushInners(NSMutableArray<IGDemoRef *> *refs, NSMutableSet<id> *modifiedInners) {
+    for (IGDemoRef *r in refs) {
+        if (r.inner && [modifiedInners containsObject:r.inner]) {
+            NSData *nd = [NSJSONSerialization dataWithJSONObject:r.inner options:0 error:nil];
+            if (nd) {
+                NSString *ns = [[NSString alloc] initWithData:nd encoding:NSUTF8StringEncoding];
+                igdemo_setInParent(r.parent, r.key, ns);
+            }
         }
     }
 }
@@ -190,9 +220,9 @@ static BOOL igdemo_dataLooksRelevant(NSData *data) {
     @try {
         if (!igdemo_dataLooksRelevant(data)) return %orig;
 
-        // Vuelco completo de los payloads de audiencia (para depurar la estructura)
+        // Vuelco completo de payloads de audiencia (depuración)
         NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        if (raw && ([raw containsString:@"organic.reel.audience"] || igdemo_stringMentionsSpain(raw))) {
+        if (raw && ([raw containsString:@"organic.reel.audience"] || igdemo_stringMentionsSpain(raw) || igdemo_stringMentionsMexico(raw))) {
             igdemo_dumpString(@"AUD", raw);
         }
 
@@ -200,8 +230,16 @@ static BOOL igdemo_dataLooksRelevant(NSData *data) {
         id parsed = %orig(data, (opts | NSJSONReadingMutableContainers | NSJSONReadingMutableLeaves), &tmpErr);
         if (!parsed) return %orig;
 
+        NSMutableArray<IGDemoRef *> *refs = [NSMutableArray array];
+        NSMutableSet<NSString *> *seen = [NSMutableSet set];
+        igdemo_collect(parsed, 0, refs, seen);
+
         NSMutableArray<NSString *> *findings = [NSMutableArray array];
-        igdemo_walk(parsed, nil, nil, 0, findings);
+        NSMutableSet<id> *modifiedInners = [NSMutableSet set];
+        if (refs.count > 0) {
+            igdemo_doSwap(refs, modifiedInners, findings);
+            igdemo_flushInners(refs, modifiedInners);
+        }
 
         if (findings.count > 0) {
             igdemo_log(@">>> %lu CAMBIOS: %@", (unsigned long)findings.count, [findings componentsJoinedByString:@"; "]);
@@ -216,5 +254,5 @@ static BOOL igdemo_dataLooksRelevant(NSData *data) {
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.2 cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.3 (swap España<->México) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
