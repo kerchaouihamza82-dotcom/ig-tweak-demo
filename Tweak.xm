@@ -164,7 +164,7 @@ static NSString *igdemo_huellaPadre(IGDemoNode *n) {
         NSMutableArray<IGDemoNode *> *candidatos = [NSMutableArray array];
         for (IGDemoNode *n in g_nodos) {
             if (igdemo_isPurePct(n.s) || n.s.length >= 40) continue;
-            if (![NSString stringWithFormat:@"%@", n.key] isEqualToString:claveTexto]) continue;
+            if (![[NSString stringWithFormat:@"%@", n.key] isEqualToString:claveTexto]) continue;
             if (![igdemo_huellaPadre(n) isEqualToString:huella]) continue;
             [candidatos addObject:n];
         }
