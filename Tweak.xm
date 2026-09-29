@@ -254,7 +254,7 @@ static NSRegularExpression *igdemo_cantRegex() {
     static NSRegularExpression *re;
     static dispatch_once_t t;
     dispatch_once(&t, ^{
-        re = [NSRegularExpression regularExpressionWithPattern:@"^\s*(\d{1,3}(?:\.\d{3})*)(,(\d+))?\s*(mil|m|k)?\s*$"
+        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{1,3}(?:\\.\\d{3})*)(,(\\d+))?\\s*(mil|m|k)?\\s*$"
                                                        options:NSRegularExpressionCaseInsensitive error:nil];
     });
     return re;
