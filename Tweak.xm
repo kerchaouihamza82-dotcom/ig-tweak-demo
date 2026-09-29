@@ -1,15 +1,12 @@
 #import <Foundation/Foundation.h>
 
-// Demo para clase - v0.0.6
-// La pantalla de audiencia llega como payload "Bloks": cada país es una fila
-// con nombre, porcentaje y barra como componentes separados.
-// v0.0.6: ESPAÑA SE INSERTA ARRIBA (sin intercambio). Los nombres rotan un
-// puesto hacia abajo: España ocupa el primer peldaño (con el 27,0 y la barra
-// completa que ya tenía ese peldaño), México baja al segundo (13,4),
-// Argentina al tercero (13,1), Chile al cuarto (12,4)... El resto igual.
-// Los valores nunca se tocan: cada peldaño conserva su número y su barra.
+// Demo para clase - v0.0.7
+// 1) Audiencia: España se INSERTA arriba (rotacion de nombres, valores intactos).
+// 2) Perfil propio: los view_count / play_count se multiplican (x25 por defecto).
 
 #define IGDEMO_TAG "[IGDEMO]"
+static const double kIGDemoViewsFactor = 25.0;         // multiplicador de views
+static NSString * const kIGDemoUsuario = @"carlos_espaarraga4"; // solo actua en este perfil
 
 static void igdemo_log(NSString *format, ...) {
     va_list args;
@@ -53,7 +50,7 @@ static void igdemo_setInParent(id parent, id key, id value) {
 static void igdemo_dumpString(NSString *tag, NSString *s) {
     if (!s) return;
     static NSMutableSet *vistos;
-    static NSInteger restantes = 2;
+    static NSInteger restantes = 3;
     static dispatch_once_t t;
     dispatch_once(&t, ^{ vistos = [NSMutableSet set]; });
     NSString *huella = [NSString stringWithFormat:@"%lu", (unsigned long)[[s substringToIndex:MIN(s.length, (NSUInteger)2000)] hash]];
@@ -118,9 +115,111 @@ static NSString *igdemo_huellaPadre(IGDemoNode *n) {
     NSArray *ks = [(NSDictionary *)n.parent allKeys];
     NSMutableArray *copias = [NSMutableArray arrayWithArray:ks];
     [copias sortUsingComparator:^NSComparisonResult(id a, id b) {
-        return [NSString stringWithFormat:@"%@", a] > [NSString stringWithFormat:@"%@", b] ? NSOrderedDescending : NSOrderedAscending;
+        return [[NSString stringWithFormat:@"%@", a] compare:[NSString stringWithFormat:@"%@", b]];
     }];
     return [copias componentsJoinedByString:@"|"];
+}
+
+// ---- Feature 1: rotacion de nombres en la audiencia (Espania arriba) ----
+static void igdemo_procesaEspana(id parsed) {
+    g_nodos = [NSMutableArray array];
+    igdemo_scanNode(parsed, nil, nil, [NSMutableArray array]);
+
+    IGDemoNode *nameE = nil, *nameM = nil;
+    for (IGDemoNode *n in g_nodos) {
+        if (igdemo_isPurePct(n.s) || n.s.length >= 40) continue;
+        if (!nameE && igdemo_stringMentionsSpain(n.s)) nameE = n;
+        if (!nameM && igdemo_stringMentionsMexico(n.s)) nameM = n;
+    }
+
+    if (!nameE || !nameM) {
+        igdemo_log(@"sin nombres: E=%d M=%d", nameE != nil, nameM != nil);
+        g_nodos = nil;
+        return;
+    }
+
+    NSString *claveTexto = [NSString stringWithFormat:@"%@", nameE.key];
+    NSString *huella = igdemo_huellaPadre(nameE);
+    NSMutableArray<IGDemoNode *> *candidatos = [NSMutableArray array];
+    for (IGDemoNode *n in g_nodos) {
+        if (igdemo_isPurePct(n.s) || n.s.length >= 40) continue;
+        if (![[NSString stringWithFormat:@"%@", n.key] isEqualToString:claveTexto]) continue;
+        if (![igdemo_huellaPadre(n) isEqualToString:huella]) continue;
+        [candidatos addObject:n];
+    }
+
+    NSInteger umbral = igdemo_lcaDepth(nameE.path, nameM.path);
+    NSInteger idxE = -1;
+    for (NSUInteger i = 0; i < candidatos.count; i++) {
+        if (candidatos[i] == nameE) { idxE = (NSInteger)i; break; }
+    }
+    if (idxE < 0) {
+        igdemo_log(@"España no está entre los candidatos (%lu)", (unsigned long)candidatos.count);
+        g_nodos = nil;
+        return;
+    }
+    NSInteger lo = idxE, hi = idxE;
+    while (lo - 1 >= 0 && igdemo_lcaDepth(candidatos[lo - 1].path, candidatos[lo].path) >= umbral) lo--;
+    while (hi + 1 < (NSInteger)candidatos.count && igdemo_lcaDepth(candidatos[hi + 1].path, candidatos[hi].path) >= umbral) hi++;
+
+    NSMutableArray<IGDemoNode *> *escalones = [NSMutableArray array];
+    for (NSInteger i = lo; i <= hi; i++) [escalones addObject:candidatos[i]];
+
+    BOOL tieneMexico = NO;
+    for (IGDemoNode *n in escalones) if (n == nameM) tieneMexico = YES;
+    if (escalones.count < 2 || !tieneMexico) {
+        igdemo_log(@"escalones insuficientes: %lu (Mexico dentro: %d)", (unsigned long)escalones.count, tieneMexico);
+        g_nodos = nil;
+        return;
+    }
+
+    NSMutableArray<NSString *> *nuevos = [NSMutableArray array];
+    [nuevos addObject:nameE.s];
+    for (IGDemoNode *n in escalones) {
+        if (n != nameE) [nuevos addObject:n.s];
+    }
+
+    NSMutableArray<NSString *> *antes = [NSMutableArray array];
+    NSMutableArray<NSString *> *despues = [NSMutableArray array];
+    for (NSUInteger i = 0; i < escalones.count; i++) {
+        [antes addObject:escalones[i].s];
+        [despues addObject:nuevos[i]];
+        if (![escalones[i].s isEqualToString:nuevos[i]]) {
+            igdemo_setInParent(escalones[i].parent, escalones[i].key, nuevos[i]);
+        }
+    }
+
+    igdemo_log(@">>> ROTACION: [%@] -> [%@]",
+               [antes componentsJoinedByString:@", "],
+               [despues componentsJoinedByString:@", "]);
+    g_nodos = nil;
+}
+
+// ---- Feature 2: multiplicar views del perfil propio ----
+static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *findings) {
+    if (depth > 25) return;
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        for (NSString *ck in @[@"view_count", @"play_count", @"viewCount", @"playCount"]) {
+            id v = obj[ck];
+            if ([v isKindOfClass:[NSNumber class]]) {
+                double d = [v doubleValue];
+                if (d > 0 && d < 100000000) {
+                    NSInteger nuevo = (NSInteger)(d * kIGDemoViewsFactor);
+                    [findings addObject:[NSString stringWithFormat:@"%@:%@ -> %@", ck, v, @(nuevo)]];
+                    igdemo_setInParent(obj, ck, @(nuevo));
+                }
+            } else if ([v isKindOfClass:[NSString class]]) {
+                [findings addObject:[NSString stringWithFormat:@"%@(texto)=%@ [sin tocar]", ck, v]];
+            }
+        }
+        for (id k in [(NSDictionary *)obj allKeys]) {
+            igdemo_infla(obj[k], depth + 1, findings);
+        }
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj) {
+            igdemo_infla(item, depth + 1, findings);
+        }
+    }
 }
 
 %hook NSJSONSerialization
@@ -131,96 +230,29 @@ static NSString *igdemo_huellaPadre(IGDemoNode *n) {
         NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         BOOL pareceAudience = raw && ([raw containsString:@"audience"] || [raw containsString:@"demograph"] ||
                                       igdemo_stringMentionsSpain(raw) || igdemo_stringMentionsMexico(raw));
-        if (!pareceAudience) return %orig;
+        BOOL pareceGrid = raw && [raw containsString:kIGDemoUsuario] &&
+                          ([raw containsString:@"view_count"] || [raw containsString:@"play_count"]);
+        if (!pareceAudience && !pareceGrid) return %orig;
 
-        if (raw) igdemo_dumpString(@"AUD", raw);
+        if (raw) igdemo_dumpString(pareceGrid ? @"GRID" : @"AUD", raw);
 
         NSError *tmpErr = nil;
         id parsed = %orig(data, (opts | NSJSONReadingMutableContainers | NSJSONReadingMutableLeaves), &tmpErr);
         if (!parsed) return %orig;
 
-        g_nodos = [NSMutableArray array];
-        igdemo_scanNode(parsed, nil, nil, [NSMutableArray array]);
-
-        // 1) Nodos de texto candidatos a "nombre de país"
-        IGDemoNode *nameE = nil, *nameM = nil;
-        for (IGDemoNode *n in g_nodos) {
-            if (igdemo_isPurePct(n.s) || n.s.length >= 40) continue;
-            if (!nameE && igdemo_stringMentionsSpain(n.s)) nameE = n;
-            if (!nameM && igdemo_stringMentionsMexico(n.s)) nameM = n;
-        }
-
-        if (!nameE || !nameM) {
-            igdemo_log(@"sin nombres: E=%d M=%d", nameE != nil, nameM != nil);
-            id r = parsed;
-            g_nodos = nil;
-            return r;
-        }
-
-        // 2) Hermanos de firma idéntica (mismo componente de texto Bloks):
-        //    misma clave del texto y mismo juego de claves del dict padre
-        NSString *claveTexto = [NSString stringWithFormat:@"%@", nameE.key];
-        NSString *huella = igdemo_huellaPadre(nameE);
-        NSMutableArray<IGDemoNode *> *candidatos = [NSMutableArray array];
-        for (IGDemoNode *n in g_nodos) {
-            if (igdemo_isPurePct(n.s) || n.s.length >= 40) continue;
-            if (![[NSString stringWithFormat:@"%@", n.key] isEqualToString:claveTexto]) continue;
-            if (![igdemo_huellaPadre(n) isEqualToString:huella]) continue;
-            [candidatos addObject:n];
-        }
-
-        // 3) Escalones: los nombres que comparten contenedor profundo con España/México
-        NSInteger umbral = igdemo_lcaDepth(nameE.path, nameM.path);
-        NSInteger idxE = -1;
-        for (NSUInteger i = 0; i < candidatos.count; i++) {
-            if (candidatos[i] == nameE) { idxE = (NSInteger)i; break; }
-        }
-        if (idxE < 0) {
-            igdemo_log(@"España no está entre los candidatos (%lu)", (unsigned long)candidatos.count);
-            id r = parsed;
-            g_nodos = nil;
-            return r;
-        }
-        NSInteger lo = idxE, hi = idxE;
-        while (lo - 1 >= 0 && igdemo_lcaDepth(candidatos[lo - 1].path, candidatos[lo].path) >= umbral) lo--;
-        while (hi + 1 < (NSInteger)candidatos.count && igdemo_lcaDepth(candidatos[hi + 1].path, candidatos[hi].path) >= umbral) hi++;
-
-        NSMutableArray<IGDemoNode *> *escalones = [NSMutableArray array];
-        for (NSInteger i = lo; i <= hi; i++) [escalones addObject:candidatos[i]];
-
-        BOOL tieneMexico = NO;
-        for (IGDemoNode *n in escalones) if (n == nameM) tieneMexico = YES;
-        if (escalones.count < 2 || !tieneMexico) {
-            igdemo_log(@"escalones insuficientes: %lu (Mexico dentro: %d)", (unsigned long)escalones.count, tieneMexico);
-            id r = parsed;
-            g_nodos = nil;
-            return r;
-        }
-
-        // 4) Rotación: España al primer peldaño, el resto baja uno
-        NSMutableArray<NSString *> *nuevos = [NSMutableArray array];
-        [nuevos addObject:nameE.s];
-        for (IGDemoNode *n in escalones) {
-            if (n != nameE) [nuevos addObject:n.s];
-        }
-
-        NSMutableArray<NSString *> *antes = [NSMutableArray array];
-        NSMutableArray<NSString *> *despues = [NSMutableArray array];
-        for (NSUInteger i = 0; i < escalones.count; i++) {
-            [antes addObject:escalones[i].s];
-            [despues addObject:nuevos[i]];
-            if (![escalones[i].s isEqualToString:nuevos[i]]) {
-                igdemo_setInParent(escalones[i].parent, escalones[i].key, nuevos[i]);
+        if (pareceGrid) {
+            NSMutableArray<NSString *> *fv = [NSMutableArray array];
+            igdemo_infla(parsed, 0, fv);
+            if (fv.count > 0) {
+                igdemo_log(@">>> VIEWS x%g: %@", kIGDemoViewsFactor, [fv componentsJoinedByString:@"; "]);
+            } else {
+                igdemo_log(@">>> VIEWS: sin campos numericos que tocar");
             }
         }
 
-        igdemo_log(@">>> ROTACION: [%@] -> [%@]",
-                   [antes componentsJoinedByString:@", "],
-                   [despues componentsJoinedByString:@", "]);
+        if (pareceAudience) igdemo_procesaEspana(parsed);
 
-        id r = parsed;
-        g_nodos = nil;
-        return r;
+        return parsed;
     } @catch (NSException *e) {
         igdemo_log(@"excepcion: %@", e);
         return %orig;
@@ -230,5 +262,5 @@ static NSString *igdemo_huellaPadre(IGDemoNode *n) {
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.6 (insertar España arriba, rotacion de nombres) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.7 (rotacion nombres + views x25 en perfil propio) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
