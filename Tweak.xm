@@ -6,10 +6,6 @@
 
 #define IGDEMO_TAG "[IGDEMO]"
 static const double kIGDemoViewsFactor = 5.0;         // multiplicador de views
-static BOOL igdemo_esSuCuenta(NSString *raw) {
-    return [raw containsString:@"carlosmotiva.clips"] || [raw containsString:@"carlos_espaarraga4"];
-}
-
 static void igdemo_log(NSString *format, ...) {
     va_list args;
     va_start(args, format);
@@ -52,7 +48,7 @@ static void igdemo_setInParent(id parent, id key, id value) {
 static void igdemo_dumpString(NSString *tag, NSString *s) {
     if (!s) return;
     static NSMutableSet *vistos;
-    static NSInteger restantes = 3;
+    static NSInteger restantes = 5;
     static dispatch_once_t t;
     dispatch_once(&t, ^{ vistos = [NSMutableSet set]; });
     NSString *huella = [NSString stringWithFormat:@"%lu", (unsigned long)[[s substringToIndex:MIN(s.length, (NSUInteger)2000)] hash]];
@@ -232,8 +228,7 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
         NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         BOOL pareceAudience = raw && ([raw containsString:@"audience"] || [raw containsString:@"demograph"] ||
                                       igdemo_stringMentionsSpain(raw) || igdemo_stringMentionsMexico(raw));
-        BOOL pareceGrid = raw && igdemo_esSuCuenta(raw) &&
-                          ([raw containsString:@"view_count"] || [raw containsString:@"play_count"]);
+        BOOL pareceGrid = raw && ([raw containsString:@"view_count"] || [raw containsString:@"play_count"] || [raw containsString:@"viewCount"] || [raw containsString:@"playCount"]);
         if (!pareceAudience && !pareceGrid) return %orig;
 
         if (raw) igdemo_dumpString(pareceGrid ? @"GRID" : @"AUD", raw);
@@ -264,5 +259,5 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.8 (rotacion nombres + views x5) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.9 (views x5 sin filtro + dumps GRID) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
