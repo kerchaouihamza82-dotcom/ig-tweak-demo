@@ -1,11 +1,15 @@
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
-// Demo para clase - v0.0.7
-// 1) Audiencia: España se INSERTA arriba (rotacion de nombres, valores intactos).
-// 2) Perfil propio: los view_count / play_count se multiplican (x25 por defecto).
+// Demo para clase - v0.0.13
+// 1) Audiencia: España arriba (rotacion de nombres) - intacta.
+// 2) VIEWS x5 en TODA la app: ahora en la capa de PINTADO (UILabel), que es
+//    donde Instagram escribe el numero final en pantalla. Un solo x5 global
+//    (cuadricula, feed, insights, todo consistente).
 
 #define IGDEMO_TAG "[IGDEMO]"
-static const double kIGDemoViewsFactor = 5.0;         // multiplicador de views
+static const double kIGDemoViewsFactor = 5.0;
+
 static void igdemo_log(NSString *format, ...) {
     va_list args;
     va_start(args, format);
@@ -48,7 +52,7 @@ static void igdemo_setInParent(id parent, id key, id value) {
 static void igdemo_dumpString(NSString *tag, NSString *s) {
     if (!s) return;
     static NSMutableSet *vistos;
-    static NSInteger restantes = 8;
+    static NSInteger restantes = 3;
     static dispatch_once_t t;
     dispatch_once(&t, ^{ vistos = [NSMutableSet set]; });
     NSString *huella = [NSString stringWithFormat:@"%lu", (unsigned long)[[s substringToIndex:MIN(s.length, (NSUInteger)2000)] hash]];
@@ -118,7 +122,7 @@ static NSString *igdemo_huellaPadre(IGDemoNode *n) {
     return [copias componentsJoinedByString:@"|"];
 }
 
-// ---- Feature 1: rotacion de nombres en la audiencia (Espania arriba) ----
+// ---- Feature 1: rotacion de nombres (Espana arriba) ----
 static void igdemo_procesaEspana(id parsed) {
     g_nodos = [NSMutableArray array];
     igdemo_scanNode(parsed, nil, nil, [NSMutableArray array]);
@@ -131,7 +135,6 @@ static void igdemo_procesaEspana(id parsed) {
     }
 
     if (!nameE || !nameM) {
-        igdemo_log(@"sin nombres: E=%d M=%d", nameE != nil, nameM != nil);
         g_nodos = nil;
         return;
     }
@@ -151,11 +154,8 @@ static void igdemo_procesaEspana(id parsed) {
     for (NSUInteger i = 0; i < candidatos.count; i++) {
         if (candidatos[i] == nameE) { idxE = (NSInteger)i; break; }
     }
-    if (idxE < 0) {
-        igdemo_log(@"España no está entre los candidatos (%lu)", (unsigned long)candidatos.count);
-        g_nodos = nil;
-        return;
-    }
+    if (idxE < 0) { g_nodos = nil; return; }
+
     NSInteger lo = idxE, hi = idxE;
     while (lo - 1 >= 0 && igdemo_lcaDepth(candidatos[lo - 1].path, candidatos[lo].path) >= umbral) lo--;
     while (hi + 1 < (NSInteger)candidatos.count && igdemo_lcaDepth(candidatos[hi + 1].path, candidatos[hi].path) >= umbral) hi++;
@@ -165,11 +165,7 @@ static void igdemo_procesaEspana(id parsed) {
 
     BOOL tieneMexico = NO;
     for (IGDemoNode *n in escalones) if (n == nameM) tieneMexico = YES;
-    if (escalones.count < 2 || !tieneMexico) {
-        igdemo_log(@"escalones insuficientes: %lu (Mexico dentro: %d)", (unsigned long)escalones.count, tieneMexico);
-        g_nodos = nil;
-        return;
-    }
+    if (escalones.count < 2 || !tieneMexico) { g_nodos = nil; return; }
 
     NSMutableArray<NSString *> *nuevos = [NSMutableArray array];
     [nuevos addObject:nameE.s];
@@ -193,46 +189,7 @@ static void igdemo_procesaEspana(id parsed) {
     g_nodos = nil;
 }
 
-// ---- Feature 2: multiplicar views del perfil propio ----
-static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *findings) {
-    if (depth > 25) return;
-    if ([obj isKindOfClass:[NSDictionary class]]) {
-        for (NSString *ck in @[@"view_count", @"play_count", @"viewCount", @"playCount"]) {
-            id v = obj[ck];
-            if ([v isKindOfClass:[NSNumber class]]) {
-                double d = [v doubleValue];
-                if (d > 0 && d < 100000000) {
-                    NSInteger nuevo = (NSInteger)(d * kIGDemoViewsFactor);
-                    [findings addObject:[NSString stringWithFormat:@"%@:%@ -> %@", ck, v, @(nuevo)]];
-                    igdemo_setInParent(obj, ck, @(nuevo));
-                }
-            } else if ([v isKindOfClass:[NSDictionary class]]) {
-                for (NSString *ik in @[@"value", @"count", @"total", @"number"]) {
-                    id iv = v[ik];
-                    if ([iv isKindOfClass:[NSNumber class]]) {
-                        double d = [iv doubleValue];
-                        if (d > 0 && d < 100000000) {
-                            NSInteger nz = (NSInteger)(d * kIGDemoViewsFactor);
-                            [findings addObject:[NSString stringWithFormat:@"%@.%@:%@ -> %@", ck, ik, iv, @(nz)]];
-                            igdemo_setInParent(v, ik, @(nz));
-                        }
-                    }
-                }
-            } else if ([v isKindOfClass:[NSString class]]) {
-                [findings addObject:[NSString stringWithFormat:@"%@(texto)=%@ [sin tocar]", ck, v]];
-            }
-        }
-        for (id k in [(NSDictionary *)obj allKeys]) {
-            igdemo_infla(obj[k], depth + 1, findings);
-        }
-    } else if ([obj isKindOfClass:[NSArray class]]) {
-        for (id item in (NSArray *)obj) {
-            igdemo_infla(item, depth + 1, findings);
-        }
-    }
-}
-
-// ---- vistas en formato texto ("1.234", "12,4 mil", "2,3 M") x factor ----
+// ---- Feature 2: views x5 en la capa de pintado ----
 
 static NSString *igdemo_miles(NSInteger n) {
     NSString *s = [NSString stringWithFormat:@"%ld", (long)n];
@@ -262,7 +219,7 @@ static NSString *igdemo_formatCantidad(double nv) {
     return igdemo_miles((NSInteger)nv);
 }
 
-// R1: 12,881 | 1.234.567 | 12,881 mil | 1.234 M (grupos de 3 cifras con separador)
+// R1: 12,881 | 1.234.567 | 12,881 mil | 1.234 M
 static NSRegularExpression *igdemo_reMiles() {
     static NSRegularExpression *re;
     static dispatch_once_t t;
@@ -273,7 +230,7 @@ static NSRegularExpression *igdemo_reMiles() {
     return re;
 }
 
-// R2: 12,4 mil | 2,3 M | 12 mil (decimal + sufijo obligatorio)
+// R2: 12,4 mil | 2,3 M | 12 mil
 static NSRegularExpression *igdemo_reSufijo() {
     static NSRegularExpression *re;
     static dispatch_once_t t;
@@ -284,8 +241,17 @@ static NSRegularExpression *igdemo_reSufijo() {
     return re;
 }
 
-// "12,881" -> "64,405" (conserva el estilo); "12,4 mil" -> "62 mil"; "2,3 M" -> "11,5 M"
-static NSString *igdemo_inflarTexto(NSString *s) {
+// R3: 847 (3 cifras sueltas, solo en etiquetas)
+static NSRegularExpression *igdemo_rePlain() {
+    static NSRegularExpression *re;
+    static dispatch_once_t t;
+    dispatch_once(&t, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{3})\\s*$" options:0 error:nil];
+    });
+    return re;
+}
+
+static NSString *igdemo_inflarLabel(NSString *s) {
     if (s.length == 0 || s.length > 16) return nil;
 
     NSTextCheckingResult *m1 = [igdemo_reMiles() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
@@ -326,30 +292,53 @@ static NSString *igdemo_inflarTexto(NSString *s) {
         else if ([suf isEqualToString:@"m"]) v *= 1000000.0;
         return igdemo_formatCantidad(v * kIGDemoViewsFactor);
     }
+
+    NSTextCheckingResult *m3 = [igdemo_rePlain() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (m3 && [m3 rangeAtIndex:1].location != NSNotFound) {
+        double v = [[s substringWithRange:[m3 rangeAtIndex:1]] doubleValue];
+        if (v <= 0) return nil;
+        return igdemo_miles((NSInteger)(v * kIGDemoViewsFactor));
+    }
     return nil;
 }
 
-static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMutableArray<NSString *> *findings) {
-    if (depth > 25) return;
-    if ([obj isKindOfClass:[NSString class]]) {
-        NSString *nuevo = igdemo_inflarTexto(obj);
-        if (nuevo && ![nuevo isEqualToString:obj]) {
-            [findings addObject:[NSString stringWithFormat:@"'%@'->'%@'", obj, nuevo]];
-            igdemo_setInParent(parent, key, nuevo);
+static NSInteger g_labelLogs = 0;
+
+%hook UILabel
+- (void)setText:(NSString *)text {
+    @try {
+        if (text.length > 0 && text.length <= 16 && g_labelLogs < 60) {
+            NSString *nuevo = igdemo_inflarLabel(text);
+            if (nuevo && ![nuevo isEqualToString:text]) {
+                g_labelLogs++;
+                igdemo_log(@"LABEL: '%@' -> '%@'", text, nuevo);
+                %orig(nuevo);
+                return;
+            }
         }
-        return;
-    }
-    if ([obj isKindOfClass:[NSDictionary class]]) {
-        for (id k in [(NSDictionary *)obj allKeys]) {
-            igdemo_inflaTexto(obj[k], obj, k, depth + 1, findings);
-        }
-    } else if ([obj isKindOfClass:[NSArray class]]) {
-        NSArray *arr = (NSArray *)obj;
-        for (NSUInteger i = 0; i < arr.count; i++) {
-            igdemo_inflaTexto(arr[i], (NSMutableArray *)arr, @(i), depth + 1, findings);
-        }
-    }
+    } @catch (NSException *e) {}
+    %orig;
 }
+- (void)setAttributedText:(NSAttributedString *)text {
+    @try {
+        if (text && text.length > 0 && text.length <= 16 && g_labelLogs < 60) {
+            NSString *s = text.string;
+            if (s) {
+                NSString *nuevo = igdemo_inflarLabel(s);
+                if (nuevo && ![nuevo isEqualToString:s]) {
+                    g_labelLogs++;
+                    igdemo_log(@"LABEL-ATTR: '%@' -> '%@'", s, nuevo);
+                    NSDictionary *attrs = [text attributesAtIndex:0 effectiveRange:NULL];
+                    NSAttributedString *na = [[NSAttributedString alloc] initWithString:nuevo attributes:attrs ?: @{}];
+                    %orig(na);
+                    return;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+    %orig;
+}
+%end
 
 %hook NSJSONSerialization
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opts error:(NSError **)error {
@@ -359,31 +348,13 @@ static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMuta
         NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         BOOL pareceAudience = raw && ([raw containsString:@"audience"] || [raw containsString:@"demograph"] ||
                                       igdemo_stringMentionsSpain(raw) || igdemo_stringMentionsMexico(raw));
-        BOOL pareceGrid = raw && ([raw containsString:@"view_count"] || [raw containsString:@"play_count"] || [raw containsString:@"viewCount"] || [raw containsString:@"playCount"]);
-        if (!pareceAudience && !pareceGrid) return %orig;
-
-        if (raw) igdemo_dumpString(pareceGrid ? @"GRID" : @"AUD", raw);
+        if (!pareceAudience) return %orig;
 
         NSError *tmpErr = nil;
         id parsed = %orig(data, (opts | NSJSONReadingMutableContainers | NSJSONReadingMutableLeaves), &tmpErr);
         if (!parsed) return %orig;
 
-        if (pareceGrid) {
-            NSMutableArray<NSString *> *fv = [NSMutableArray array];
-            igdemo_infla(parsed, 0, fv);
-            igdemo_inflaTexto(parsed, nil, nil, 0, fv);
-            if (fv.count > 0) {
-                igdemo_log(@">>> VIEWS x%g: %@", kIGDemoViewsFactor, [fv componentsJoinedByString:@"; "]);
-            } else {
-                igdemo_log(@">>> VIEWS: sin campos que tocar");
-                if (raw && ![raw containsString:@"FBPlaybackResolution"] && ![raw containsString:@"video_duration"]) {
-                    igdemo_dumpString(@"GRID2", raw);
-                }
-            }
-        }
-
-        if (pareceAudience) igdemo_procesaEspana(parsed);
-
+        igdemo_procesaEspana(parsed);
         return parsed;
     } @catch (NSException *e) {
         igdemo_log(@"excepcion: %@", e);
@@ -394,5 +365,5 @@ static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMuta
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.12 (views x5 + dicts anidados + dumps GRID2) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.13 (rotacion Espana + views x5 en etiquetas) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
