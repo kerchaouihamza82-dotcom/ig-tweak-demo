@@ -250,41 +250,71 @@ static NSString *igdemo_formatCantidad(double nv) {
     return igdemo_miles((NSInteger)nv);
 }
 
-static NSRegularExpression *igdemo_cantRegex() {
+// R1: 12,881 | 1.234.567 | 12,881 mil | 1.234 M (grupos de 3 cifras con separador)
+static NSRegularExpression *igdemo_reMiles() {
     static NSRegularExpression *re;
     static dispatch_once_t t;
     dispatch_once(&t, ^{
-        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{1,3}(?:\\.\\d{3})*)(,(\\d+))?\\s*(mil|m|k)?\\s*$"
+        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{1,3}(?:[.,]\\d{3})+)(\\s*(mil|m|k))?\\s*$"
                                                        options:NSRegularExpressionCaseInsensitive error:nil];
     });
     return re;
 }
 
-// "1.234" -> "6.170"; "12,4 mil" -> "62 mil"; "847" -> "4.235"
-static NSString *igdemo_inflarTexto(NSString *s) {
-    if (s.length == 0 || s.length > 12) return nil;
-    NSTextCheckingResult *m = [igdemo_cantRegex() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
-    if (!m) return nil;
-    if ([m rangeAtIndex:1].location == NSNotFound) return nil;
+// R2: 12,4 mil | 2,3 M | 12 mil (decimal + sufijo obligatorio)
+static NSRegularExpression *igdemo_reSufijo() {
+    static NSRegularExpression *re;
+    static dispatch_once_t t;
+    dispatch_once(&t, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{1,3})(?:,([1-9]\\d{0,1}))?\\s*(mil|m|k)\\s*$"
+                                                       options:NSRegularExpressionCaseInsensitive error:nil];
+    });
+    return re;
+}
 
-    NSString *ent = [s substringWithRange:[m rangeAtIndex:1]];
-    ent = [ent stringByReplacingOccurrencesOfString:@"." withString:@""];
-    double v = ent.doubleValue;
-    if (v <= 0) return nil;
-    if ([m rangeAtIndex:3].location != NSNotFound) {
-        NSString *dec = [s substringWithRange:[m rangeAtIndex:3]];
-        double d = dec.doubleValue;
-        while (d >= 1) d /= 10.0;
-        v += d;
+// "12,881" -> "64,405" (conserva el estilo); "12,4 mil" -> "62 mil"; "2,3 M" -> "11,5 M"
+static NSString *igdemo_inflarTexto(NSString *s) {
+    if (s.length == 0 || s.length > 16) return nil;
+
+    NSTextCheckingResult *m1 = [igdemo_reMiles() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (m1 && [m1 rangeAtIndex:1].location != NSNotFound) {
+        NSString *num = [s substringWithRange:[m1 rangeAtIndex:1]];
+        NSString *sep = nil;
+        for (NSUInteger i = 0; i < num.length; i++) {
+            unichar c = [num characterAtIndex:i];
+            if (c == ',' || c == '.') sep = [NSString stringWithFormat:@"%c", c];
+        }
+        NSString *limpio = [[num stringByReplacingOccurrencesOfString:@"." withString:@""]
+                            stringByReplacingOccurrencesOfString:"," withString:@""];
+        double v = limpio.doubleValue;
+        if (v <= 0) return nil;
+        if ([m1 rangeAtIndex:3].location != NSNotFound) {
+            NSString *suf = [[s substringWithRange:[m1 rangeAtIndex:3]] lowercaseString];
+            if ([suf isEqualToString:@"mil"] || [suf isEqualToString:@"k"]) v *= 1000.0;
+            else if ([suf isEqualToString:@"m"]) v *= 1000000.0;
+            return igdemo_formatCantidad(v * kIGDemoViewsFactor);
+        }
+        NSString *base = igdemo_miles((NSInteger)(v * kIGDemoViewsFactor));
+        if ([sep isEqualToString:@","]) base = [base stringByReplacingOccurrencesOfString:@"." withString:@","];
+        return base;
     }
-    if ([m rangeAtIndex:4].location != NSNotFound) {
-        NSString *suf = [[s substringWithRange:[m rangeAtIndex:4]] lowercaseString];
+
+    NSTextCheckingResult *m2 = [igdemo_reSufijo() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (m2 && [m2 rangeAtIndex:1].location != NSNotFound) {
+        double v = [[s substringWithRange:[m2 rangeAtIndex:1]] doubleValue];
+        if ([m2 rangeAtIndex:2].location != NSNotFound) {
+            NSString *dec = [s substringWithRange:[m2 rangeAtIndex:2]];
+            double d = dec.doubleValue;
+            while (d >= 1) d /= 10.0;
+            v += d;
+        }
+        if (v <= 0) return nil;
+        NSString *suf = [[s substringWithRange:[m2 rangeAtIndex:3]] lowercaseString];
         if ([suf isEqualToString:@"mil"] || [suf isEqualToString:@"k"]) v *= 1000.0;
         else if ([suf isEqualToString:@"m"]) v *= 1000000.0;
+        return igdemo_formatCantidad(v * kIGDemoViewsFactor);
     }
-    double nv = v * kIGDemoViewsFactor;
-    if (nv < 1) return nil;
-    return igdemo_formatCantidad(nv);
+    return nil;
 }
 
 static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMutableArray<NSString *> *findings) {
@@ -349,5 +379,5 @@ static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMuta
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.10 (views x5 numeros + textos) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.11 (views x5, parser miles con coma/punto) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
