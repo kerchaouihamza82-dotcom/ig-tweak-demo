@@ -48,7 +48,7 @@ static void igdemo_setInParent(id parent, id key, id value) {
 static void igdemo_dumpString(NSString *tag, NSString *s) {
     if (!s) return;
     static NSMutableSet *vistos;
-    static NSInteger restantes = 5;
+    static NSInteger restantes = 8;
     static dispatch_once_t t;
     dispatch_once(&t, ^{ vistos = [NSMutableSet set]; });
     NSString *huella = [NSString stringWithFormat:@"%lu", (unsigned long)[[s substringToIndex:MIN(s.length, (NSUInteger)2000)] hash]];
@@ -205,6 +205,18 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
                     NSInteger nuevo = (NSInteger)(d * kIGDemoViewsFactor);
                     [findings addObject:[NSString stringWithFormat:@"%@:%@ -> %@", ck, v, @(nuevo)]];
                     igdemo_setInParent(obj, ck, @(nuevo));
+                }
+            } else if ([v isKindOfClass:[NSDictionary class]]) {
+                for (NSString *ik in @[@"value", @"count", @"total", @"number"]) {
+                    id iv = v[ik];
+                    if ([iv isKindOfClass:[NSNumber class]]) {
+                        double d = [iv doubleValue];
+                        if (d > 0 && d < 100000000) {
+                            NSInteger nz = (NSInteger)(d * kIGDemoViewsFactor);
+                            [findings addObject:[NSString stringWithFormat:@"%@.%@:%@ -> %@", ck, ik, iv, @(nz)]];
+                            igdemo_setInParent(v, ik, @(nz));
+                        }
+                    }
                 }
             } else if ([v isKindOfClass:[NSString class]]) {
                 [findings addObject:[NSString stringWithFormat:@"%@(texto)=%@ [sin tocar]", ck, v]];
@@ -364,6 +376,9 @@ static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMuta
                 igdemo_log(@">>> VIEWS x%g: %@", kIGDemoViewsFactor, [fv componentsJoinedByString:@"; "]);
             } else {
                 igdemo_log(@">>> VIEWS: sin campos que tocar");
+                if (raw && ![raw containsString:@"FBPlaybackResolution"] && ![raw containsString:@"video_duration"]) {
+                    igdemo_dumpString(@"GRID2", raw);
+                }
             }
         }
 
@@ -379,5 +394,5 @@ static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMuta
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.11 (views x5, parser miles con coma/punto) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.12 (views x5 + dicts anidados + dumps GRID2) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
