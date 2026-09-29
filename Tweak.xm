@@ -285,7 +285,7 @@ static NSString *igdemo_inflarTexto(NSString *s) {
             if (c == ',' || c == '.') sep = [NSString stringWithFormat:@"%c", c];
         }
         NSString *limpio = [[num stringByReplacingOccurrencesOfString:@"." withString:@""]
-                            stringByReplacingOccurrencesOfString:"," withString:@""];
+                            stringByReplacingOccurrencesOfString:@"," withString:@""];
         double v = limpio.doubleValue;
         if (v <= 0) return nil;
         if ([m1 rangeAtIndex:3].location != NSNotFound) {
