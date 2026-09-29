@@ -49,26 +49,6 @@ static void igdemo_setInParent(id parent, id key, id value) {
     } @catch (NSException *e) {}
 }
 
-static void igdemo_dumpString(NSString *tag, NSString *s) {
-    if (!s) return;
-    static NSMutableSet *vistos;
-    static NSInteger restantes = 3;
-    static dispatch_once_t t;
-    dispatch_once(&t, ^{ vistos = [NSMutableSet set]; });
-    NSString *huella = [NSString stringWithFormat:@"%lu", (unsigned long)[[s substringToIndex:MIN(s.length, (NSUInteger)2000)] hash]];
-    if ([vistos containsObject:huella] || restantes <= 0) return;
-    [vistos addObject:huella];
-    restantes--;
-    NSUInteger len = MIN(s.length, (NSUInteger)30000);
-    NSUInteger chunk = 500;
-    NSUInteger total = (len + chunk - 1) / chunk;
-    for (NSUInteger i = 0; i < len; i += chunk) {
-        NSUInteger e = MIN(i + chunk, len);
-        igdemo_log(@"DUMP[%@ %lu/%lu] %@", tag, (unsigned long)(i / chunk + 1), (unsigned long)total,
-                   [s substringWithRange:NSMakeRange(i, e - i)]);
-    }
-}
-
 @interface IGDemoNode : NSObject
 @property (strong) id parent;
 @property (strong) id key;
