@@ -220,6 +220,95 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
     }
 }
 
+// ---- vistas en formato texto ("1.234", "12,4 mil", "2,3 M") x factor ----
+
+static NSString *igdemo_miles(NSInteger n) {
+    NSString *s = [NSString stringWithFormat:@"%ld", (long)n];
+    NSMutableString *r = [NSMutableString string];
+    NSInteger len = (NSInteger)s.length;
+    for (NSInteger i = 0; i < len; i++) {
+        [r appendFormat:@"%@", [s substringWithRange:NSMakeRange((NSUInteger)i, 1)]];
+        NSInteger rest = len - 1 - i;
+        if (rest > 0 && rest % 3 == 0) [r appendString:@"."];
+    }
+    return r;
+}
+
+static NSString *igdemo_conComa(double v) {
+    NSString *s = [NSString stringWithFormat:@"%.1f", v];
+    return [s stringByReplacingOccurrencesOfString:@"." withString:@","];
+}
+
+static NSString *igdemo_formatCantidad(double nv) {
+    if (nv >= 1000000) {
+        double m = nv / 1000000.0;
+        if (m >= 10) return [NSString stringWithFormat:@"%.0f M", m];
+        return [NSString stringWithFormat:@"%@ M", igdemo_conComa(m)];
+    }
+    if (nv >= 100000) return [NSString stringWithFormat:@"%@ mil", igdemo_miles((NSInteger)(nv / 1000.0))];
+    if (nv >= 10000)  return [NSString stringWithFormat:@"%@ mil", igdemo_conComa(nv / 1000.0)];
+    return igdemo_miles((NSInteger)nv);
+}
+
+static NSRegularExpression *igdemo_cantRegex() {
+    static NSRegularExpression *re;
+    static dispatch_once_t t;
+    dispatch_once(&t, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"^\s*(\d{1,3}(?:\.\d{3})*)(,(\d+))?\s*(mil|m|k)?\s*$"
+                                                       options:NSRegularExpressionCaseInsensitive error:nil];
+    });
+    return re;
+}
+
+// "1.234" -> "6.170"; "12,4 mil" -> "62 mil"; "847" -> "4.235"
+static NSString *igdemo_inflarTexto(NSString *s) {
+    if (s.length == 0 || s.length > 12) return nil;
+    NSTextCheckingResult *m = [igdemo_cantRegex() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (!m) return nil;
+    if ([m rangeAtIndex:1].location == NSNotFound) return nil;
+
+    NSString *ent = [s substringWithRange:[m rangeAtIndex:1]];
+    ent = [ent stringByReplacingOccurrencesOfString:@"." withString:@""];
+    double v = ent.doubleValue;
+    if (v <= 0) return nil;
+    if ([m rangeAtIndex:3].location != NSNotFound) {
+        NSString *dec = [s substringWithRange:[m rangeAtIndex:3]];
+        double d = dec.doubleValue;
+        while (d >= 1) d /= 10.0;
+        v += d;
+    }
+    if ([m rangeAtIndex:4].location != NSNotFound) {
+        NSString *suf = [[s substringWithRange:[m rangeAtIndex:4]] lowercaseString];
+        if ([suf isEqualToString:@"mil"] || [suf isEqualToString:@"k"]) v *= 1000.0;
+        else if ([suf isEqualToString:@"m"]) v *= 1000000.0;
+    }
+    double nv = v * kIGDemoViewsFactor;
+    if (nv < 1) return nil;
+    return igdemo_formatCantidad(nv);
+}
+
+static void igdemo_inflaTexto(id obj, id parent, id key, NSInteger depth, NSMutableArray<NSString *> *findings) {
+    if (depth > 25) return;
+    if ([obj isKindOfClass:[NSString class]]) {
+        NSString *nuevo = igdemo_inflarTexto(obj);
+        if (nuevo && ![nuevo isEqualToString:obj]) {
+            [findings addObject:[NSString stringWithFormat:@"'%@'->'%@'", obj, nuevo]];
+            igdemo_setInParent(parent, key, nuevo);
+        }
+        return;
+    }
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        for (id k in [(NSDictionary *)obj allKeys]) {
+            igdemo_inflaTexto(obj[k], obj, k, depth + 1, findings);
+        }
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        NSArray *arr = (NSArray *)obj;
+        for (NSUInteger i = 0; i < arr.count; i++) {
+            igdemo_inflaTexto(arr[i], (NSMutableArray *)arr, @(i), depth + 1, findings);
+        }
+    }
+}
+
 %hook NSJSONSerialization
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opts error:(NSError **)error {
     @try {
@@ -240,10 +329,11 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
         if (pareceGrid) {
             NSMutableArray<NSString *> *fv = [NSMutableArray array];
             igdemo_infla(parsed, 0, fv);
+            igdemo_inflaTexto(parsed, nil, nil, 0, fv);
             if (fv.count > 0) {
                 igdemo_log(@">>> VIEWS x%g: %@", kIGDemoViewsFactor, [fv componentsJoinedByString:@"; "]);
             } else {
-                igdemo_log(@">>> VIEWS: sin campos numericos que tocar");
+                igdemo_log(@">>> VIEWS: sin campos que tocar");
             }
         }
 
@@ -259,5 +349,5 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.9 (views x5 sin filtro + dumps GRID) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.10 (views x5 numeros + textos) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
