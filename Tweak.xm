@@ -5,8 +5,10 @@
 // 2) Perfil propio: los view_count / play_count se multiplican (x25 por defecto).
 
 #define IGDEMO_TAG "[IGDEMO]"
-static const double kIGDemoViewsFactor = 25.0;         // multiplicador de views
-static NSString * const kIGDemoUsuario = @"carlos_espaarraga4"; // solo actua en este perfil
+static const double kIGDemoViewsFactor = 5.0;         // multiplicador de views
+static BOOL igdemo_esSuCuenta(NSString *raw) {
+    return [raw containsString:@"carlosmotiva.clips"] || [raw containsString:@"carlos_espaarraga4"];
+}
 
 static void igdemo_log(NSString *format, ...) {
     va_list args;
@@ -230,7 +232,7 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
         NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         BOOL pareceAudience = raw && ([raw containsString:@"audience"] || [raw containsString:@"demograph"] ||
                                       igdemo_stringMentionsSpain(raw) || igdemo_stringMentionsMexico(raw));
-        BOOL pareceGrid = raw && [raw containsString:kIGDemoUsuario] &&
+        BOOL pareceGrid = raw && igdemo_esSuCuenta(raw) &&
                           ([raw containsString:@"view_count"] || [raw containsString:@"play_count"]);
         if (!pareceAudience && !pareceGrid) return %orig;
 
@@ -262,5 +264,5 @@ static void igdemo_infla(id obj, NSInteger depth, NSMutableArray<NSString *> *fi
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.7 (rotacion nombres + views x25 en perfil propio) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.8 (rotacion nombres + views x5) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
