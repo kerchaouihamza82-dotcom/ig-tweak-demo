@@ -1,14 +1,10 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 
-// Demo para clase - v0.0.13
-// 1) Audiencia: España arriba (rotacion de nombres) - intacta.
-// 2) VIEWS x5 en TODA la app: ahora en la capa de PINTADO (UILabel), que es
-//    donde Instagram escribe el numero final en pantalla. Un solo x5 global
-//    (cuadricula, feed, insights, todo consistente).
+// Demo para clase - v0.0.14
+// Version ESTABLE: solo la rotacion de nombres en la audiencia
+// (España se inserta arriba, valores intactos). Sin hooks de UI.
 
 #define IGDEMO_TAG "[IGDEMO]"
-static const double kIGDemoViewsFactor = 5.0;
 
 static void igdemo_log(NSString *format, ...) {
     va_list args;
@@ -102,7 +98,6 @@ static NSString *igdemo_huellaPadre(IGDemoNode *n) {
     return [copias componentsJoinedByString:@"|"];
 }
 
-// ---- Feature 1: rotacion de nombres (Espana arriba) ----
 static void igdemo_procesaEspana(id parsed) {
     g_nodos = [NSMutableArray array];
     igdemo_scanNode(parsed, nil, nil, [NSMutableArray array]);
@@ -169,157 +164,6 @@ static void igdemo_procesaEspana(id parsed) {
     g_nodos = nil;
 }
 
-// ---- Feature 2: views x5 en la capa de pintado ----
-
-static NSString *igdemo_miles(NSInteger n) {
-    NSString *s = [NSString stringWithFormat:@"%ld", (long)n];
-    NSMutableString *r = [NSMutableString string];
-    NSInteger len = (NSInteger)s.length;
-    for (NSInteger i = 0; i < len; i++) {
-        [r appendFormat:@"%@", [s substringWithRange:NSMakeRange((NSUInteger)i, 1)]];
-        NSInteger rest = len - 1 - i;
-        if (rest > 0 && rest % 3 == 0) [r appendString:@"."];
-    }
-    return r;
-}
-
-static NSString *igdemo_conComa(double v) {
-    NSString *s = [NSString stringWithFormat:@"%.1f", v];
-    return [s stringByReplacingOccurrencesOfString:@"." withString:@","];
-}
-
-static NSString *igdemo_formatCantidad(double nv) {
-    if (nv >= 1000000) {
-        double m = nv / 1000000.0;
-        if (m >= 10) return [NSString stringWithFormat:@"%.0f M", m];
-        return [NSString stringWithFormat:@"%@ M", igdemo_conComa(m)];
-    }
-    if (nv >= 100000) return [NSString stringWithFormat:@"%@ mil", igdemo_miles((NSInteger)(nv / 1000.0))];
-    if (nv >= 10000)  return [NSString stringWithFormat:@"%@ mil", igdemo_conComa(nv / 1000.0)];
-    return igdemo_miles((NSInteger)nv);
-}
-
-// R1: 12,881 | 1.234.567 | 12,881 mil | 1.234 M
-static NSRegularExpression *igdemo_reMiles() {
-    static NSRegularExpression *re;
-    static dispatch_once_t t;
-    dispatch_once(&t, ^{
-        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{1,3}(?:[.,]\\d{3})+)(\\s*(mil|m|k))?\\s*$"
-                                                       options:NSRegularExpressionCaseInsensitive error:nil];
-    });
-    return re;
-}
-
-// R2: 12,4 mil | 2,3 M | 12 mil
-static NSRegularExpression *igdemo_reSufijo() {
-    static NSRegularExpression *re;
-    static dispatch_once_t t;
-    dispatch_once(&t, ^{
-        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{1,3})(?:,([1-9]\\d{0,1}))?\\s*(mil|m|k)\\s*$"
-                                                       options:NSRegularExpressionCaseInsensitive error:nil];
-    });
-    return re;
-}
-
-// R3: 847 (3 cifras sueltas, solo en etiquetas)
-static NSRegularExpression *igdemo_rePlain() {
-    static NSRegularExpression *re;
-    static dispatch_once_t t;
-    dispatch_once(&t, ^{
-        re = [NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d{3})\\s*$" options:0 error:nil];
-    });
-    return re;
-}
-
-static NSString *igdemo_inflarLabel(NSString *s) {
-    if (s.length == 0 || s.length > 16) return nil;
-
-    NSTextCheckingResult *m1 = [igdemo_reMiles() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
-    if (m1 && [m1 rangeAtIndex:1].location != NSNotFound) {
-        NSString *num = [s substringWithRange:[m1 rangeAtIndex:1]];
-        NSString *sep = nil;
-        for (NSUInteger i = 0; i < num.length; i++) {
-            unichar c = [num characterAtIndex:i];
-            if (c == ',' || c == '.') sep = [NSString stringWithFormat:@"%c", c];
-        }
-        NSString *limpio = [[num stringByReplacingOccurrencesOfString:@"." withString:@""]
-                            stringByReplacingOccurrencesOfString:@"," withString:@""];
-        double v = limpio.doubleValue;
-        if (v <= 0) return nil;
-        if ([m1 rangeAtIndex:3].location != NSNotFound) {
-            NSString *suf = [[s substringWithRange:[m1 rangeAtIndex:3]] lowercaseString];
-            if ([suf isEqualToString:@"mil"] || [suf isEqualToString:@"k"]) v *= 1000.0;
-            else if ([suf isEqualToString:@"m"]) v *= 1000000.0;
-            return igdemo_formatCantidad(v * kIGDemoViewsFactor);
-        }
-        NSString *base = igdemo_miles((NSInteger)(v * kIGDemoViewsFactor));
-        if ([sep isEqualToString:@","]) base = [base stringByReplacingOccurrencesOfString:@"." withString:@","];
-        return base;
-    }
-
-    NSTextCheckingResult *m2 = [igdemo_reSufijo() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
-    if (m2 && [m2 rangeAtIndex:1].location != NSNotFound) {
-        double v = [[s substringWithRange:[m2 rangeAtIndex:1]] doubleValue];
-        if ([m2 rangeAtIndex:2].location != NSNotFound) {
-            NSString *dec = [s substringWithRange:[m2 rangeAtIndex:2]];
-            double d = dec.doubleValue;
-            while (d >= 1) d /= 10.0;
-            v += d;
-        }
-        if (v <= 0) return nil;
-        NSString *suf = [[s substringWithRange:[m2 rangeAtIndex:3]] lowercaseString];
-        if ([suf isEqualToString:@"mil"] || [suf isEqualToString:@"k"]) v *= 1000.0;
-        else if ([suf isEqualToString:@"m"]) v *= 1000000.0;
-        return igdemo_formatCantidad(v * kIGDemoViewsFactor);
-    }
-
-    NSTextCheckingResult *m3 = [igdemo_rePlain() firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
-    if (m3 && [m3 rangeAtIndex:1].location != NSNotFound) {
-        double v = [[s substringWithRange:[m3 rangeAtIndex:1]] doubleValue];
-        if (v <= 0) return nil;
-        return igdemo_miles((NSInteger)(v * kIGDemoViewsFactor));
-    }
-    return nil;
-}
-
-static NSInteger g_labelLogs = 0;
-
-%hook UILabel
-- (void)setText:(NSString *)text {
-    @try {
-        if (text.length > 0 && text.length <= 16 && g_labelLogs < 60) {
-            NSString *nuevo = igdemo_inflarLabel(text);
-            if (nuevo && ![nuevo isEqualToString:text]) {
-                g_labelLogs++;
-                igdemo_log(@"LABEL: '%@' -> '%@'", text, nuevo);
-                %orig(nuevo);
-                return;
-            }
-        }
-    } @catch (NSException *e) {}
-    %orig;
-}
-- (void)setAttributedText:(NSAttributedString *)text {
-    @try {
-        if (text && text.length > 0 && text.length <= 16 && g_labelLogs < 60) {
-            NSString *s = text.string;
-            if (s) {
-                NSString *nuevo = igdemo_inflarLabel(s);
-                if (nuevo && ![nuevo isEqualToString:s]) {
-                    g_labelLogs++;
-                    igdemo_log(@"LABEL-ATTR: '%@' -> '%@'", s, nuevo);
-                    NSDictionary *attrs = [text attributesAtIndex:0 effectiveRange:NULL];
-                    NSAttributedString *na = [[NSAttributedString alloc] initWithString:nuevo attributes:attrs ?: @{}];
-                    %orig(na);
-                    return;
-                }
-            }
-        }
-    } @catch (NSException *e) {}
-    %orig;
-}
-%end
-
 %hook NSJSONSerialization
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opts error:(NSError **)error {
     @try {
@@ -345,5 +189,5 @@ static NSInteger g_labelLogs = 0;
 
 %ctor {
     %init;
-    igdemo_log(@"tweak v0.0.13 (rotacion Espana + views x5 en etiquetas) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
+    igdemo_log(@"tweak v0.0.14 (solo Espana, estable) cargado en %@", [[NSBundle mainBundle] bundleIdentifier]);
 }
